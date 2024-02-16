@@ -4,65 +4,45 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/gorilla/websocket"
+	"github.com/TutorialEdge/realtime-chat-go-react/pkg/websocket"
 )
 
-// Define our upgrader with Read and Write buffer sizes
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-
-	// Check the origin of the connection,
-	//	allowing us to make requests from our React development server
-	CheckOrigin: func(r *http.Request) bool { return true },
-}
-
-// Define a reader which will listen for new messages being sent to our WebSocket endpoint
-func reader(conn *websocket.Conn) {
-	for {
-		// Read in a message
-		messageType, p, err := conn.ReadMessage()
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-
-		// Print out that message for clarity
-		fmt.Println(string(p))
-
-		if err := conn.WriteMessage(messageType, p); err != nil {
-			fmt.Println(err)
-			return
-		}
-	}
-}
-
 // Define our WebSocket endpoint
-func serveWs(w http.ResponseWriter, r *http.Request) {
+func serveWs(pool *websocket.Pool, w http.ResponseWriter, r *http.Request) {
 	fmt.Println(r.Host)
 
 	// Upgrade this connection to a WebSocket
 	// connection
-	ws, err := upgrader.Upgrade(w, r, nil)
+	ws, err := websocket.Upgrade(w, r)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Fprintf(w, "%+V\n", err)
 	}
 
-	// Listen indefinitely for new messages coming
-	// through on our WebSocket connection
-	reader(ws)
+	// Create a new client
+	client := &websocket.Client{
+		Conn: ws,
+		Pool: pool,
+	}
+
+	// Register the client
+	pool.Register <- client
+	client.Read()
 }
 
 // setupRoutes sets up the routes for the server
 func setupRoutes() {
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "Simple Server")
+	// Create a new WebSocket pool
+	pool := websocket.NewPool()
+	// Start the pool
+	go pool.Start()
+	// Handle the WebSocket endpoint
+	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		serveWs(pool, w, r)
 	})
-	http.HandleFunc("/ws", serveWs)
 }
 
 func main() {
-	fmt.Println("Chat App v0.01")
+	fmt.Println("Distributed Chat App v0.01")
 	setupRoutes()
 	// Start the server on port 8080
 	http.ListenAndServe(":8080", nil)
